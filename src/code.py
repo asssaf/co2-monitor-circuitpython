@@ -3,16 +3,24 @@ Air quality monitor
 """
 import time
 
+from adafruit_display_text import label
+import adafruit_il0373
 import alarm # pylint: disable=import-error
 import adafruit_scd4x
 import board
+import displayio
 import neopixel
+import supervisor # pylint: disable=import-error
+import terminalio
 
-DEEP_SLEEP_SECONDS = 10
 WAIT_FOR_DATA_READY_SECONDS = 1
 WAIT_FOR_MEASUREMENTS_TRIES = 60
+MIN_TIME_BETWEEN_REFRESH_SECONDS = 180
+DISPLAY_WIDTH = 296
+DISPLAY_HEIGHT = 128
 
 print("Starting...")
+
 pixel = neopixel.NeoPixel(board.NEOPIXEL, 1)
 pixel.brightness = 0.1
 pixel.fill((0, 255, 0))
@@ -46,10 +54,23 @@ def deep_sleep(seconds):
     alarm.exit_and_deep_sleep_until_alarms(time_alarm)
 
 
+def shutdown():
+    """
+    go to sleep
+    """
+    pixel.fill((0, 0, 0))
+    deep_sleep(MIN_TIME_BETWEEN_REFRESH_SECONDS)
+
+
 def main():
     """
     Main entry point
     """
+    if supervisor.runtime.usb_connected and not alarm.wake_alarm:
+        print("Woke up without an alarm")
+        # go to sleep to avoid refreshing the display too soon
+        shutdown()
+
     #print("Serial number:", [hex(i) for i in scd4x.serial_number])
 
     scd4x.start_periodic_measurement()
@@ -59,9 +80,58 @@ def main():
 
     scd4x.stop_periodic_measurement()
 
-    pixel.fill((0, 0, 0))
+    # update display
+    top_group = displayio.Group()
 
-    deep_sleep(DEEP_SLEEP_SECONDS)
+    background_color = 0xFFFFFF
+    background_bitmap = displayio.Bitmap(DISPLAY_WIDTH, DISPLAY_HEIGHT, 1)
+    palette = displayio.Palette(1)
+    palette[0] = background_color
+    background_tile = displayio.TileGrid(background_bitmap, pixel_shader=palette)
+
+    text = f"{scd4x.CO2}"
+    font = terminalio.FONT
+    color = 0x000000
+
+    text_area = label.Label(font, text=text, color=color, scale=3)
+    text_area.anchor_point = (0.5, 0.5)
+    text_area.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
+
+    top_group.append(background_tile)
+    top_group.append(text_area)
+
+    displayio.release_displays()
+    spi = board.SPI()
+    epd_cs = board.D9
+    epd_dc = board.D10
+    display_bus = displayio.FourWire(
+        spi, command=epd_dc, chip_select=epd_cs, baudrate=1000000
+    )
+
+    display = adafruit_il0373.IL0373(
+        display_bus,
+        width=DISPLAY_WIDTH,
+        height=DISPLAY_HEIGHT,
+        rotation=270,
+        black_bits_inverted=False,
+        color_bits_inverted=False,
+        grayscale=True,
+        refresh_time=1,
+    )
+
+    print(f"Display time to refresh: {display.time_to_refresh}")
+    if display.time_to_refresh > 0:
+        time.sleep(display.time_to_refresh)
+
+    display.show(top_group)
+
+    print("Refreshing display")
+    display.refresh()
+    #print(f"Display busy: {display.busy}")
+
+    displayio.release_displays()
+
+    shutdown()
     # Does not return, so we never get here.
 
 
