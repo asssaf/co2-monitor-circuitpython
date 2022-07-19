@@ -5,6 +5,7 @@ import time
 
 from adafruit_display_text import label
 import adafruit_il0373
+from analogio import AnalogIn
 import alarm # pylint: disable=import-error
 import adafruit_scd4x
 import board
@@ -30,6 +31,9 @@ i2c = board.I2C()
 scd4x = adafruit_scd4x.SCD4X(i2c)
 scd4x.self_calibration_enabled = False
 
+battery_in = AnalogIn(board.A0)
+
+
 def get_measurement():
     """
     get a single measurement
@@ -42,6 +46,14 @@ def get_measurement():
             print()
             return
         time.sleep(WAIT_FOR_DATA_READY_SECONDS)
+
+
+def get_battery_voltage():
+    """
+    get the battery voltage using an analog pin
+    """
+    battery_voltage = 3.3 * battery_in.value / 65536 * 2
+    return battery_voltage
 
 
 def deep_sleep(seconds):
@@ -63,6 +75,7 @@ def shutdown():
     deep_sleep(MIN_TIME_BETWEEN_REFRESH_SECONDS)
 
 
+# pylint: disable=too-many-locals
 def main():
     """
     Main entry point
@@ -90,16 +103,24 @@ def main():
     palette[0] = background_color
     background_tile = displayio.TileGrid(background_bitmap, pixel_shader=palette)
 
-    text = f"{scd4x.CO2}"
+    co2_text = f"{scd4x.CO2}"
     font = terminalio.FONT
     color = 0x000000
 
-    text_area = label.Label(font, text=text, color=color, scale=3)
-    text_area.anchor_point = (0.5, 0.5)
-    text_area.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
+    co2_label = label.Label(font, text=co2_text, color=color, scale=3)
+    co2_label.anchor_point = (0.5, 0.5)
+    co2_label.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
+
+    battery_voltage = get_battery_voltage()
+    battery_voltage_text = f"{battery_voltage:0.2f} V"
+    print(f"Battery voltage: {battery_voltage_text}")
+    battery_label = label.Label(font, text=battery_voltage_text, color=color, scale=1)
+    battery_label.anchor_point = (0.0, 1.0)
+    battery_label.anchored_position = (10, DISPLAY_HEIGHT -10)
 
     top_group.append(background_tile)
-    top_group.append(text_area)
+    top_group.append(co2_label)
+    top_group.append(battery_label)
 
     if DISPLAY_ENABLED:
         displayio.release_displays()
