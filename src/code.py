@@ -18,6 +18,7 @@ WAIT_FOR_MEASUREMENTS_TRIES = 60
 MIN_TIME_BETWEEN_REFRESH_SECONDS = 180
 DISPLAY_WIDTH = 296
 DISPLAY_HEIGHT = 128
+DISPLAY_ENABLED = True
 
 print("Starting...")
 
@@ -100,36 +101,37 @@ def main():
     top_group.append(background_tile)
     top_group.append(text_area)
 
-    displayio.release_displays()
-    spi = board.SPI()
-    epd_cs = board.D9
-    epd_dc = board.D10
-    display_bus = displayio.FourWire(
-        spi, command=epd_dc, chip_select=epd_cs, baudrate=1000000
-    )
+    if DISPLAY_ENABLED:
+        displayio.release_displays()
+        spi = board.SPI()
+        epd_cs = board.D9
+        epd_dc = board.D10
+        display_bus = displayio.FourWire(
+            spi, command=epd_dc, chip_select=epd_cs, baudrate=1000000
+        )
 
-    display = adafruit_il0373.IL0373(
-        display_bus,
-        width=DISPLAY_WIDTH,
-        height=DISPLAY_HEIGHT,
-        rotation=270,
-        black_bits_inverted=False,
-        color_bits_inverted=False,
-        grayscale=True,
-        refresh_time=1,
-    )
+        display = adafruit_il0373.IL0373(
+            display_bus,
+            width=DISPLAY_WIDTH,
+            height=DISPLAY_HEIGHT,
+            rotation=270,
+            black_bits_inverted=False,
+            color_bits_inverted=False,
+            grayscale=True,
+            refresh_time=1,
+        )
 
-    print(f"Display time to refresh: {display.time_to_refresh}")
-    if display.time_to_refresh > 0:
-        time.sleep(display.time_to_refresh)
+        print(f"Display time to refresh: {display.time_to_refresh}")
+        if display.time_to_refresh > 0:
+            time.sleep(display.time_to_refresh)
 
-    display.show(top_group)
+        display.show(top_group)
 
-    print("Refreshing display")
-    display.refresh()
-    #print(f"Display busy: {display.busy}")
+        print("Refreshing display")
+        display.refresh()
+        #print(f"Display busy: {display.busy}")
 
-    displayio.release_displays()
+        displayio.release_displays()
 
     shutdown()
     # Does not return, so we never get here.
