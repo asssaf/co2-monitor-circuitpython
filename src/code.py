@@ -1,13 +1,14 @@
 """
 Air quality monitor
 """
+import asyncio
 import time
 
 from adafruit_display_text import label
 import adafruit_il0373
+import adafruit_scd4x
 from analogio import AnalogIn
 import alarm # pylint: disable=import-error
-import adafruit_scd4x
 import board
 import displayio
 import neopixel
@@ -33,27 +34,51 @@ scd4x.self_calibration_enabled = False
 
 battery_in = AnalogIn(board.A0)
 
+# pylint: disable=too-few-public-methods
+class BatteryMonitor:
+    """
+    Battery monitor
+    """
+    def __init__(self, in_pin):
+        self.voltage = None
+        self.in_pin = in_pin
 
-def get_measurement():
-    """
-    get a single measurement
-    """
-    for _ in range(WAIT_FOR_MEASUREMENTS_TRIES):
-        if scd4x.data_ready:
-            print(f"CO2: {scd4x.CO2} ppm")
-            print(f"Temperature: {scd4x.temperature:0.1f} *C")
-            print(f"Humidity: {scd4x.relative_humidity:0.1f} %")
-            print()
-            return
-        time.sleep(WAIT_FOR_DATA_READY_SECONDS)
+    async def fetch(self):
+        """
+        fetch the battery voltage through the analog pin
+        """
+        print("getting battery voltage")
+        self.voltage = 3.3 * self.in_pin.value / 65536 * 2
+        print(f"battery voltage: {self.voltage:0.2f} V")
 
 
-def get_battery_voltage():
+class CO2Monitor:
     """
-    get the battery voltage using an analog pin
+    CO2 Monitor
     """
-    battery_voltage = 3.3 * battery_in.value / 65536 * 2
-    return battery_voltage
+    def __init__(self, sensor):
+        self.sensor = sensor
+
+    async def fetch(self):
+        """
+        get a single measurement
+        """
+        print("starting co2 measurement")
+        self.sensor.start_periodic_measurement()
+        print("waiting for co2 measurement...")
+
+        for _ in range(WAIT_FOR_MEASUREMENTS_TRIES):
+            if self.sensor.data_ready:
+                print(f"CO2: {self.sensor.CO2} ppm")
+                print(f"Temperature: {self.sensor.temperature:0.1f} *C")
+                print(f"Humidity: {self.sensor.relative_humidity:0.1f} %")
+                print()
+                break
+            await asyncio.sleep(WAIT_FOR_DATA_READY_SECONDS)
+
+        print("stopping co2 measurement...")
+        self.sensor.stop_periodic_measurement()
+        print("stopped co2 measurement")
 
 
 def deep_sleep(seconds):
@@ -76,25 +101,10 @@ def shutdown():
 
 
 # pylint: disable=too-many-locals
-def main():
+def update_display(co2_monitor, battery_monitor):
     """
-    Main entry point
+    update display
     """
-    if supervisor.runtime.usb_connected and not alarm.wake_alarm:
-        print("Woke up without an alarm")
-        # go to sleep to avoid refreshing the display too soon
-        shutdown()
-
-    #print("Serial number:", [hex(i) for i in scd4x.serial_number])
-
-    scd4x.start_periodic_measurement()
-    print("Waiting for first measurement....")
-
-    get_measurement()
-
-    scd4x.stop_periodic_measurement()
-
-    # update display
     top_group = displayio.Group()
 
     background_color = 0xFFFFFF
@@ -103,7 +113,7 @@ def main():
     palette[0] = background_color
     background_tile = displayio.TileGrid(background_bitmap, pixel_shader=palette)
 
-    co2_text = f"{scd4x.CO2}"
+    co2_text = f"{co2_monitor.sensor.CO2}"
     font = terminalio.FONT
     color = 0x000000
 
@@ -111,9 +121,7 @@ def main():
     co2_label.anchor_point = (0.5, 0.5)
     co2_label.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
 
-    battery_voltage = get_battery_voltage()
-    battery_voltage_text = f"{battery_voltage:0.2f} V"
-    print(f"Battery voltage: {battery_voltage_text}")
+    battery_voltage_text = f"{battery_monitor.voltage:0.2f} V"
     battery_label = label.Label(font, text=battery_voltage_text, color=color, scale=1)
     battery_label.anchor_point = (0.0, 1.0)
     battery_label.anchored_position = (10, DISPLAY_HEIGHT -10)
@@ -122,44 +130,67 @@ def main():
     top_group.append(co2_label)
     top_group.append(battery_label)
 
-    if DISPLAY_ENABLED:
-        displayio.release_displays()
-        spi = board.SPI()
-        epd_cs = board.D9
-        epd_dc = board.D10
-        display_bus = displayio.FourWire(
-            spi, command=epd_dc, chip_select=epd_cs, baudrate=1000000
-        )
+    if not DISPLAY_ENABLED:
+        return
 
-        display = adafruit_il0373.IL0373(
-            display_bus,
-            width=DISPLAY_WIDTH,
-            height=DISPLAY_HEIGHT,
-            rotation=270,
-            black_bits_inverted=False,
-            color_bits_inverted=False,
-            grayscale=True,
-            refresh_time=1,
-        )
+    displayio.release_displays()
+    spi = board.SPI()
+    epd_cs = board.D9
+    epd_dc = board.D10
+    display_bus = displayio.FourWire(
+        spi, command=epd_dc, chip_select=epd_cs, baudrate=1000000
+    )
 
-        print(f"Display time to refresh: {display.time_to_refresh}")
-        if display.time_to_refresh > 0:
-            time.sleep(display.time_to_refresh)
+    display = adafruit_il0373.IL0373(
+        display_bus,
+        width=DISPLAY_WIDTH,
+        height=DISPLAY_HEIGHT,
+        rotation=270,
+        black_bits_inverted=False,
+        color_bits_inverted=False,
+        grayscale=True,
+        refresh_time=1,
+    )
 
-        display.show(top_group)
+    print(f"Display time to refresh: {display.time_to_refresh}")
+    if display.time_to_refresh > 0:
+        time.sleep(display.time_to_refresh)
 
-        print("Refreshing display")
-        display.refresh()
-        #print(f"Display busy: {display.busy}")
+    display.show(top_group)
 
-        displayio.release_displays()
+    print("Refreshing display")
+    display.refresh()
+    #print(f"Display busy: {display.busy}")
+
+    displayio.release_displays()
+
+
+async def main():
+    """
+    Main entry point
+    """
+    if supervisor.runtime.usb_connected and not alarm.wake_alarm:
+        print("Woke up without an alarm")
+        # go to sleep to avoid refreshing the display too soon
+        shutdown()
+
+    co2_monitor = CO2Monitor(scd4x)
+    co2_task = asyncio.create_task(co2_monitor.fetch())
+
+    battery_monitor = BatteryMonitor(battery_in)
+    battery_task = asyncio.create_task(battery_monitor.fetch())
+
+    await asyncio.gather(co2_task, battery_task)
+
+    # update display
+    update_display(co2_monitor, battery_monitor)
 
     shutdown()
     # Does not return, so we never get here.
 
 
 try:
-    main()
+    asyncio.run(main())
 
 except Exception as e:
     print(f"Error: {e}")

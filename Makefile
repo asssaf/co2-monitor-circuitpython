@@ -2,7 +2,7 @@ PYLINT = pylint
 PYLINTFLAGS = -rn
 
 PYTHONFILES := $(wildcard src/*.py)
-LIB_FILES := adafruit_il0373.mpy adafruit_scd4x.mpy neopixel.mpy adafruit_display_text/
+LIB_FILES := adafruit_il0373.mpy adafruit_scd4x.mpy adafruit_ticks.mpy neopixel.mpy adafruit_display_text/ asyncio/
 LIB_PATHS := $(addprefix $(LIB_DIR)/,$(LIB_FILES))
 
 pylint: $(patsubst %.py,%.pylint,$(PYTHONFILES))
