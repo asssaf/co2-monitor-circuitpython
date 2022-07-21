@@ -28,11 +28,8 @@ pixel = neopixel.NeoPixel(board.NEOPIXEL, 1)
 pixel.brightness = 0.1
 pixel.fill((0, 255, 0))
 
-i2c = board.I2C()
-scd4x = adafruit_scd4x.SCD4X(i2c)
-scd4x.self_calibration_enabled = False
-
 battery_in = AnalogIn(board.A0)
+
 
 # pylint: disable=too-few-public-methods
 class BatteryMonitor:
@@ -113,15 +110,21 @@ def update_display(co2_monitor, battery_monitor):
     palette[0] = background_color
     background_tile = displayio.TileGrid(background_bitmap, pixel_shader=palette)
 
-    co2_text = f"{co2_monitor.sensor.CO2}"
     font = terminalio.FONT
     color = 0x000000
+
+    co2_text = "0"
+    if co2_monitor:
+        co2_text = f"{co2_monitor.sensor.CO2}"
 
     co2_label = label.Label(font, text=co2_text, color=color, scale=3)
     co2_label.anchor_point = (0.5, 0.5)
     co2_label.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
 
-    battery_voltage_text = f"{battery_monitor.voltage:0.2f} V"
+    battery_voltage_text = "0 V"
+    if battery_monitor:
+        battery_voltage_text = f"{battery_monitor.voltage:0.2f} V"
+
     battery_label = label.Label(font, text=battery_voltage_text, color=color, scale=1)
     battery_label.anchor_point = (0.0, 1.0)
     battery_label.anchored_position = (10, DISPLAY_HEIGHT -10)
@@ -174,13 +177,29 @@ async def main():
         # go to sleep to avoid refreshing the display too soon
         shutdown()
 
-    co2_monitor = CO2Monitor(scd4x)
-    co2_task = asyncio.create_task(co2_monitor.fetch())
+    tasks = []
+
+    co2_monitor = None
+    try:
+        i2c = board.I2C()
+        scd4x = adafruit_scd4x.SCD4X(i2c)
+        scd4x.self_calibration_enabled = False
+        co2_monitor = CO2Monitor(scd4x)
+
+    except RuntimeError as err:
+        print(f"error initializing i2c: {err}")
 
     battery_monitor = BatteryMonitor(battery_in)
-    battery_task = asyncio.create_task(battery_monitor.fetch())
 
-    await asyncio.gather(co2_task, battery_task)
+    if co2_monitor:
+        co2_task = asyncio.create_task(co2_monitor.fetch())
+        tasks.append(co2_task)
+
+    if battery_monitor:
+        battery_task = asyncio.create_task(battery_monitor.fetch())
+        tasks.append(battery_task)
+
+    await asyncio.gather(*tasks)
 
     # update display
     update_display(co2_monitor, battery_monitor)
