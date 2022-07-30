@@ -186,7 +186,7 @@ async def main():
         scd4x.self_calibration_enabled = False
         co2_monitor = CO2Monitor(scd4x)
 
-    except RuntimeError as err:
+    except (RuntimeError, ValueError) as err:
         print(f"error initializing i2c: {err}")
 
     battery_monitor = BatteryMonitor(battery_in)
