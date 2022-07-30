@@ -10,6 +10,7 @@ import adafruit_scd4x
 from analogio import AnalogIn
 import alarm # pylint: disable=import-error
 import board
+import digitalio
 import displayio
 import neopixel
 import supervisor # pylint: disable=import-error
@@ -21,14 +22,14 @@ MIN_TIME_BETWEEN_REFRESH_SECONDS = 180
 DISPLAY_WIDTH = 296
 DISPLAY_HEIGHT = 128
 DISPLAY_ENABLED = True
+BATTERY_VOLTAGE_PIN = board.A0
+DONE_PIN = board.A1
 
 print("Starting...")
 
 pixel = neopixel.NeoPixel(board.NEOPIXEL, 1)
 pixel.brightness = 0.1
 pixel.fill((0, 255, 0))
-
-battery_in = AnalogIn(board.A0)
 
 
 # pylint: disable=too-few-public-methods
@@ -82,6 +83,16 @@ def deep_sleep(seconds):
     """
     set up a wake up alarm and go to deep sleep
     """
+    # trigger the done output
+    if DONE_PIN:
+        done_pin = digitalio.DigitalInOut(DONE_PIN)
+        done_pin.direction = digitalio.Direction.OUTPUT
+        while True:
+            done_pin.value = True
+            time.sleep(1/1000000.0)
+            done_pin.value = False
+            time.sleep(1/1000000.0)
+
     # Create a an alarm that will trigger 20 seconds from now.
     time_alarm = alarm.time.TimeAlarm(monotonic_time=time.monotonic() + seconds)
     # Exit the program, and then deep sleep until the alarm wakes us.
@@ -164,6 +175,11 @@ def update_display(co2_monitor, battery_monitor):
     print("Refreshing display")
     display.refresh()
     #print(f"Display busy: {display.busy}")
+    if DONE_PIN:
+        # wait for the display to actually finish updating before cutting power
+        time.sleep(5)
+
+    print("Done refreshing display")
 
     displayio.release_displays()
 
@@ -172,7 +188,7 @@ async def main():
     """
     Main entry point
     """
-    if supervisor.runtime.usb_connected and not alarm.wake_alarm:
+    if supervisor.runtime.usb_connected and not alarm.wake_alarm and not DONE_PIN:
         print("Woke up without an alarm")
         # go to sleep to avoid refreshing the display too soon
         shutdown()
@@ -189,7 +205,10 @@ async def main():
     except (RuntimeError, ValueError) as err:
         print(f"error initializing i2c: {err}")
 
-    battery_monitor = BatteryMonitor(battery_in)
+    battery_monitor = None
+    if BATTERY_VOLTAGE_PIN:
+        battery_in = AnalogIn(BATTERY_VOLTAGE_PIN)
+        battery_monitor = BatteryMonitor(battery_in)
 
     if co2_monitor:
         co2_task = asyncio.create_task(co2_monitor.fetch())
