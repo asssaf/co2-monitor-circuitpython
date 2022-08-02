@@ -6,6 +6,7 @@ import time
 
 from adafruit_display_text import label
 import adafruit_il0373
+from adafruit_lc709203f import LC709203F
 import adafruit_scd4x
 from analogio import AnalogIn
 import alarm # pylint: disable=import-error
@@ -23,6 +24,7 @@ DISPLAY_WIDTH = 296
 DISPLAY_HEIGHT = 128
 DISPLAY_ENABLED = True
 BATTERY_VOLTAGE_PIN = board.A0
+BATTERY_I2C = 0xb
 DONE_PIN = board.A1
 
 print("Starting...")
@@ -48,6 +50,25 @@ class BatteryMonitor:
         print("getting battery voltage")
         self.voltage = 3.3 * self.in_pin.value / 65536 * 2
         print(f"battery voltage: {self.voltage:0.2f} V")
+
+
+class I2CBatteryMonitor:
+    """
+    Battery Monitor using LC709203
+    """
+    def __init__(self, sensor):
+        self.voltage = None
+        self.percent = None
+        self.sensor = sensor
+
+    async def fetch(self):
+        """
+        fetch the battery voltage through i2c
+        """
+        print("getting battery voltage")
+        self.voltage = self.sensor.cell_voltage
+        self.percent = self.sensor.cell_percent
+        print(f"battery voltage: {self.voltage:0.2f} V  ({self.percent:0.2f}%)")
 
 
 class CO2Monitor:
@@ -109,7 +130,7 @@ def shutdown():
 
 
 # pylint: disable=too-many-locals
-def update_display(co2_monitor, battery_monitor):
+def update_display(co2_monitor, battery_monitor, i2c_battery_monitor):
     """
     update display
     """
@@ -132,9 +153,13 @@ def update_display(co2_monitor, battery_monitor):
     co2_label.anchor_point = (0.5, 0.5)
     co2_label.anchored_position = (DISPLAY_WIDTH // 2, DISPLAY_HEIGHT // 2)
 
-    battery_voltage_text = "0 V"
+    battery_voltage_text = ""
     if battery_monitor:
         battery_voltage_text = f"{battery_monitor.voltage:0.2f} V"
+
+    if i2c_battery_monitor:
+        battery_voltage_text += f"{i2c_battery_monitor.voltage:0.2f} V"
+        battery_voltage_text += f" ({i2c_battery_monitor.percent:0.2}%)"
 
     battery_label = label.Label(font, text=battery_voltage_text, color=color, scale=1)
     battery_label.anchor_point = (0.0, 1.0)
@@ -210,6 +235,15 @@ async def main():
         battery_in = AnalogIn(BATTERY_VOLTAGE_PIN)
         battery_monitor = BatteryMonitor(battery_in)
 
+    i2c_battery_monitor = None
+    if BATTERY_I2C:
+        try:
+            i2c = board.I2C()
+            lc709203f = LC709203F(board.I2C(), address=BATTERY_I2C)
+            i2c_battery_monitor = I2CBatteryMonitor(lc709203f)
+        except (RuntimeError, ValueError, OSError) as err:
+            print(f"error initializing i2c: {err}")
+
     if co2_monitor:
         co2_task = asyncio.create_task(co2_monitor.fetch())
         tasks.append(co2_task)
@@ -218,10 +252,14 @@ async def main():
         battery_task = asyncio.create_task(battery_monitor.fetch())
         tasks.append(battery_task)
 
+    if i2c_battery_monitor:
+        i2c_battery_task = asyncio.create_task(i2c_battery_monitor.fetch())
+        tasks.append(i2c_battery_task)
+
     await asyncio.gather(*tasks)
 
     # update display
-    update_display(co2_monitor, battery_monitor)
+    update_display(co2_monitor, battery_monitor, i2c_battery_monitor)
 
     shutdown()
     # Does not return, so we never get here.
