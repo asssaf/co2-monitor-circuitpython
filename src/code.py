@@ -6,7 +6,7 @@ import time
 
 from adafruit_display_text import label
 import adafruit_il0373
-from adafruit_lc709203f import LC709203F
+from adafruit_lc709203f import LC709203F, PackSize
 import adafruit_scd4x
 from analogio import AnalogIn
 import alarm # pylint: disable=import-error
@@ -240,6 +240,7 @@ async def main():
         try:
             i2c = board.I2C()
             lc709203f = LC709203F(board.I2C(), address=BATTERY_I2C)
+            lc709203f.pack_size = PackSize.MAH400 # pylint: disable=no-member
             i2c_battery_monitor = I2CBatteryMonitor(lc709203f)
         except (RuntimeError, ValueError, OSError) as err:
             print(f"error initializing i2c: {err}")
